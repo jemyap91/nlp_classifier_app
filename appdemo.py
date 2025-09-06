@@ -261,9 +261,8 @@ def batch_predict_optimized(texts, model, tokenizer, original_id2label, consolid
     all_preds = []
     all_scores = []
     
-    # Create progress containers
+    # Progress bar only (no per-batch status text/metrics)
     progress_bar = st.progress(0)
-    status_container = st.container()
     
     total_batches = (len(texts) + BATCH_SIZE - 1) // BATCH_SIZE
     start_time = time.time()
@@ -274,19 +273,11 @@ def batch_predict_optimized(texts, model, tokenizer, original_id2label, consolid
         
         # Calculate ETA
         if batch_idx > 0:
+            # Keep internal timing for ETA if needed later; do not display per-batch metrics
             elapsed = time.time() - start_time
             avg_time_per_batch = elapsed / batch_idx
             remaining_batches = total_batches - current_batch
             eta = remaining_batches * avg_time_per_batch
-            
-            with status_container:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Progress", f"{current_batch}/{total_batches} batches")
-                with col2:
-                    st.metric("Items Processed", f"{min(i + BATCH_SIZE, len(texts))}/{len(texts)}")
-                with col3:
-                    st.metric("ETA", f"{eta:.1f}s")
         
         # Tokenize
         encoding = tokenizer(
@@ -315,9 +306,8 @@ def batch_predict_optimized(texts, model, tokenizer, original_id2label, consolid
         progress = (current_batch / total_batches)
         progress_bar.progress(progress)
     
-    # Clear progress displays
+    # Clear progress display
     progress_bar.empty()
-    status_container.empty()
     
     # Cleanup
     gc.collect()
@@ -349,8 +339,9 @@ def cleanup_memory():
 
 def create_advanced_visualizations(df: pd.DataFrame):
     """Create professional visualizations"""
-    col1, col2 = st.columns(2)
-    
+    # Single chart: classification distribution only (confidence histogram removed)
+    col1 = st.container()
+
     with col1:
         # Distribution chart
         dist = df['predicted_label'].value_counts().reset_index()
@@ -384,33 +375,7 @@ def create_advanced_visualizations(df: pd.DataFrame):
         )
         
         st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Confidence distribution
-        fig2 = go.Figure(data=[
-            go.Histogram(
-                x=df['confidence'],
-                nbinsx=20,
-                marker=dict(
-                    color='rgba(59, 130, 246, 0.6)',
-                    line=dict(color='rgba(59, 130, 246, 1)', width=1)
-                ),
-                hovertemplate='Confidence: %{x}<br>Count: %{y}<extra></extra>'
-            )
-        ])
-        
-        fig2.update_layout(
-            title="Confidence Distribution",
-            xaxis_title="Confidence Score",
-            yaxis_title="Count",
-            height=400,
-            showlegend=False,
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Inter")
-        )
-        
-        st.plotly_chart(fig2, use_container_width=True)
+    # Confidence histogram removed as requested
 
 # ==================== MAIN APPLICATION ====================
 
@@ -515,7 +480,7 @@ def main():
                 
                 with main_status.container():
                     st.markdown("### Stage 2: AI Classification")
-                    st.info(f"Processing {len(df):,} projects through neural network...")
+                    st.info(f"Processing {len(df):,} projects...")
                 
                 # Check cache first
                 cache_key = get_prediction_cache_key(df["text"].tolist())
@@ -573,6 +538,12 @@ def main():
 
                 # Add detailed statistics section
                 st.markdown("### Detailed Prediction Statistics")
+                st.info(
+                    "- Predicted Count: how many rows the model called this class.\n"
+                    "- Predicted Share: Predicted Count divided by all rows (percent).\n"
+                    "- Avg Confidence: average 'how sure' score for those rows.\n"
+                    "- Precision: of those rows, how many were truly this class (needs true labels)."
+                )
 
                 # Calculate per-class statistics
                 class_stats = []
@@ -580,35 +551,68 @@ def main():
                     label_df = df[df['predicted_label'] == label]
                     stats_dict = {
                         'Class': label,
-                        'Predictions': len(label_df),
-                        'Percentage': f"{len(label_df)/len(df)*100:.1f}%",
+                        'Predicted Count': len(label_df),
+                        'Predicted Share': f"{len(label_df)/len(df)*100:.1f}%",
                         'Avg Confidence': f"{label_df['confidence'].mean():.1%}"
                     }
                     
                     if 'true_label' in df.columns:
                         true_label_df = label_df[label_df['true_label'].notna()]
                         if len(true_label_df) > 0:
-                            accuracy = (true_label_df['predicted_label'] == true_label_df['true_label']).mean()
-                            stats_dict['Class Accuracy'] = f"{accuracy:.1%}"
+                            precision_val = (true_label_df['predicted_label'] == true_label_df['true_label']).mean()
+                            stats_dict['Precision'] = f"{precision_val:.1%}"
                         else:
-                            stats_dict['Class Accuracy'] = "N/A"
+                            stats_dict['Precision'] = "N/A"
                     
                     class_stats.append(stats_dict)
 
-                # Display as dataframe
+                # Display as dataframe (predicted class distribution + precision)
                 stats_df = pd.DataFrame(class_stats)
                 st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
+                # Per-label accuracy aligned with training report (by true label)
+                if 'true_label' in df.columns and df['true_label'].notna().any():
+                    st.markdown("### Per-Label Accuracy (by True Label)")
+                    st.info(
+                        "- True Count: how many rows are actually this class (from the data uploaded).\n"
+                        "- Recall: of those rows, how many the model got right."
+                    )
+                    per_true_rows = []
+                    true_df = df[df['true_label'].notna()].copy()
+                    for lbl, grp in true_df.groupby('true_label'):
+                        support = len(grp)
+                        acc = float((grp['predicted_label'] == grp['true_label']).mean()) if support else float('nan')
+                        per_true_rows.append({
+                            'Label': lbl,
+                            'True Count': support,
+                            'Recall': f"{acc:.1%}" if support else 'N/A',
+                        })
+                    per_true_df = pd.DataFrame(per_true_rows).sort_values('Label').reset_index(drop=True)
+                    st.dataframe(per_true_df, use_container_width=True, hide_index=True)
+                    per_true_csv = per_true_df.to_csv(index=False)
+                    st.download_button(
+                        "Download Per-Label Accuracy",
+                        per_true_csv,
+                        f"per_label_accuracy_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+                        "text/csv"
+                    )
+
+                # Optional: true label distribution if provided
+                if 'true_label' in df.columns and df['true_label'].notna().any():
+                    st.markdown("### True Label Distribution (uploaded data)")
+                    true_dist = df['true_label'].dropna().value_counts().reset_index()
+                    true_dist.columns = ['Class', 'Count']
+                    st.dataframe(true_dist, use_container_width=True, hide_index=True)
+
                 # Add training set information if available
                 if consolidated_classes:
-                    st.markdown("### Model Training Information")
                     training_info = {
                         'Total Classes': len(consolidated_classes),
                         'Model Type': 'DistilBERT',
                         'Max Sequence Length': MAX_LENGTH,
-                        'Batch Size': BATCH_SIZE
+                        'Batch Size': BATCH_SIZE,
                     }
-                    
+
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.info(f"Classes: {training_info['Total Classes']}")
