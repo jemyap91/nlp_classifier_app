@@ -295,16 +295,25 @@ def main():
                 "test_support": support,
                 "test_accuracy": acc,
             })
-        per_label_df = pd.DataFrame(per_label_rows).sort_values("label").reset_index(drop=True)
+        # Sort per-label metrics by highest test accuracy, then by support (descending)
+        per_label_df = (
+            pd.DataFrame(per_label_rows)
+            .sort_values(["test_accuracy", "test_support"], ascending=[False, False], na_position="last")
+            .reset_index(drop=True)
+        )
 
         # Training set label volume
         train_labels_int = np.array(train_test["train"]["label"])  # ints in [0..num_labels-1]
         train_counts = np.bincount(train_labels_int, minlength=num_labels)
-        train_volume_df = pd.DataFrame({
-            "label_id": list(range(num_labels)),
-            "label": [id2label[i] for i in range(num_labels)],
-            "train_count": train_counts,
-        }).sort_values("label").reset_index(drop=True)
+        train_volume_df = (
+            pd.DataFrame({
+                "label_id": list(range(num_labels)),
+                "label": [id2label[i] for i in range(num_labels)],
+                "train_count": train_counts,
+            })
+            .sort_values("train_count", ascending=False)
+            .reset_index(drop=True)
+        )
 
         # Save both reports
         out_dir = Path("cache")

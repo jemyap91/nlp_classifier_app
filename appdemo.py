@@ -604,24 +604,7 @@ def main():
                     true_dist.columns = ['Class', 'Count']
                     st.dataframe(true_dist, use_container_width=True, hide_index=True)
 
-                # Add training set information if available
-                if consolidated_classes:
-                    training_info = {
-                        'Total Classes': len(consolidated_classes),
-                        'Model Type': 'DistilBERT',
-                        'Max Sequence Length': MAX_LENGTH,
-                        'Batch Size': BATCH_SIZE,
-                    }
-
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.info(f"Classes: {training_info['Total Classes']}")
-                    with col2:
-                        st.info(f"Model: {training_info['Model Type']}")
-                    with col3:
-                        st.info(f"Max Length: {training_info['Max Sequence Length']}")
-                    with col4:
-                        st.info(f"Batch Size: {training_info['Batch Size']}")
+                # Removed system information from main page (available under Settings tab)
                 
                 # Visualizations
                 st.markdown("### Analysis")
